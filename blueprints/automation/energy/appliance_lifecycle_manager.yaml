@@ -1,0 +1,233 @@
+blueprint:
+  name: "Appliance Lifecycle Manager (v0.1.8)"
+  description: "v0.1.8 | Fix: Remaining time logic and UI rendering errors."
+  domain: automation
+  input:
+    appliance_switch:
+      name: "Smart Plug Switch"
+      selector: { entity: { domain: switch } }
+    appliance_name:
+      name: "Appliance Friendly Name"
+      default: "Appliance"
+    cycle_duration:
+      name: "Cycle Duration"
+      description: "Minutos estimados del programa."
+      default: 150
+      selector:
+        number: { min: 1, max: 600, unit_of_measurement: "min" }
+    power_sensor:
+      name: "Power Sensor"
+      selector: { entity: { domain: sensor, device_class: power } }
+    energy_window_schedule:
+      name: "Cheap Energy Schedule"
+      selector: { entity: { domain: schedule } }
+    state_helper:
+      name: "State Machine Helper"
+      selector: { entity: { domain: input_select } }
+    notify_group:
+      name: "Notification Group"
+      selector: { text: {} }
+    msg_wait_window:
+      name: "Wait Message"
+      default: "🕒 Paused. Out of cheap hours. You have 5 min to force start."
+      selector: { text: {} }
+    msg_error:
+      name: "Error Message"
+      default: "⚠️ The door seems to be open or there is a start error."
+      selector: { text: {} }
+    msg_finished:
+      name: "Finished Message"
+      default: "✅ Cycle finished at {{ now().strftime('%H:%M') }}"
+      selector: { text: {} }
+    start_threshold:
+      name: "Start Threshold (W)"
+      default: 3
+      selector:
+        number: { min: 1, max: 100, unit_of_measurement: "W" }
+    notification_timeout:
+      name: "Notification Timeout (min)"
+      default: 5
+      selector:
+        number: { min: 1, max: 60, unit_of_measurement: "min" }
+    start_timeout:
+      name: "Error Timeout (min)"
+      default: 5
+      selector:
+        number: { min: 1, max: 30, unit_of_measurement: "min" }
+    end_threshold:
+      name: "End Threshold (W)"
+      default: 2
+      selector:
+        number: { min: 0, max: 50, unit_of_measurement: "W" }
+    end_delay:
+      name: "End Confirmation (s)"
+      default: 180
+      selector:
+        number: { min: 1, max: 600, unit_of_measurement: "s" }
+
+variables:
+  helper_entity: !input state_helper
+  notify_service: !input notify_group
+  switch_entity: !input appliance_switch
+  schedule_entity: !input energy_window_schedule
+  cycle_min: !input cycle_duration
+  friendly_name: !input appliance_name
+  random_tag: "bypass_{{ states[switch_entity].object_id }}_{{ as_timestamp(now()) | int }}"
+  action_bypass: "BYPASS_ACTION"
+  txt_wait: !input msg_wait_window
+  txt_error: !input msg_error
+  txt_finished: !input msg_finished
+  # Cálculo robusto: si no hay next_event, devolvemos un número muy alto para no bloquear
+  remaining_window: >
+    {% set next = state_attr(schedule_entity, 'next_event') %}
+    {% if is_state(schedule_entity, 'on') and next != None %}
+      {{ (as_timestamp(next) - as_timestamp(now())) / 60 }}
+    {% elif is_state(schedule_entity, 'on') %}
+      999
+    {% else %}
+      0
+    {% endif %}
+
+trigger:
+  - id: "trigger_power_start"
+    platform: numeric_state
+    entity_id: !input power_sensor
+    above: !input start_threshold
+    for: "00:00:10"
+  - id: "trigger_window_opened"
+    platform: state
+    entity_id: !input energy_window_schedule
+    from: "off"
+    to: "on"
+  - id: "trigger_notification_action"
+    platform: event
+    event_type: mobile_app_notification_action
+    event_data: { action: "BYPASS_ACTION" }
+  - id: "trigger_power_end"
+    platform: numeric_state
+    entity_id: !input power_sensor
+    below: !input end_threshold
+    for: { seconds: !input end_delay }
+  - id: "trigger_error_timeout"
+    platform: state
+    entity_id: !input appliance_switch
+    to: "on"
+    for: { minutes: !input start_timeout }
+
+action:
+  - choose:
+      # SCENARIO A: PAUSA (Fuera de horario O ventana insuficiente)
+      - conditions:
+          - condition: trigger
+            id: "trigger_power_start"
+          - condition: template
+            value_template: "{{ is_state(helper_entity, 'IDLE') }}"
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: !input energy_window_schedule
+                state: "off"
+              - condition: template
+                value_template: "{{ is_state(schedule_entity, 'on') and remaining_window < cycle_min }}"
+        sequence:
+          - action: switch.turn_off
+            target: { entity_id: !input appliance_switch }
+          - action: input_select.select_option
+            data: { option: "WAITING_FOR_WINDOW" }
+            target: { entity_id: !input state_helper }
+          - action: "{{ notify_service }}"
+            data:
+              title: "{{ friendly_name }}: Energy Saver"
+              message: "{{ txt_wait }}"
+              data:
+                tag: "{{ random_tag }}"
+                actions:
+                  - action: "{{ action_bypass }}"
+                    title: "Bypass (Start Now)"
+          - delay: { minutes: !input notification_timeout }
+          - if:
+              - condition: state
+                entity_id: !input state_helper
+                state: "WAITING_FOR_WINDOW"
+            then:
+              - action: "{{ notify_service }}"
+                data:
+                  message: "clear_notification"
+                  data: { tag: "{{ random_tag }}" }
+
+      # SCENARIO E: INICIO DIRECTO (Horario ON y tiempo OK)
+      - conditions:
+          - condition: trigger
+            id: "trigger_power_start"
+          - condition: template
+            value_template: "{{ is_state(helper_entity, 'IDLE') }}"
+          - condition: state
+            entity_id: !input energy_window_schedule
+            state: "on"
+          - condition: template
+            value_template: "{{ remaining_window >= cycle_min }}"
+        sequence:
+          - action: input_select.select_option
+            data: { option: "RUNNING" }
+            target: { entity_id: !input state_helper }
+
+      # SCENARIO B: REANUDAR (Bypass o ventana abierta)
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: "trigger_window_opened"
+              - condition: trigger
+                id: "trigger_notification_action"
+          - condition: state
+            entity_id: !input state_helper
+            state: "WAITING_FOR_WINDOW"
+        sequence:
+          - action: "{{ notify_service }}"
+            data:
+              message: "clear_notification"
+              data: { tag: "{{ random_tag }}" }
+          - action: switch.turn_on
+            target: { entity_id: !input appliance_switch }
+          - action: input_select.select_option
+            data: { option: "RUNNING" }
+            target: { entity_id: !input state_helper }
+
+      # SCENARIO C: ERROR
+      - conditions:
+          - condition: trigger
+            id: "trigger_error_timeout"
+          - condition: state
+            entity_id: !input state_helper
+            state: "RUNNING"
+          - condition: numeric_state
+            entity_id: !input power_sensor
+            below: !input start_threshold
+        sequence:
+          - action: input_select.select_option
+            data: { option: "ERROR" }
+            target: { entity_id: !input state_helper }
+          - action: "{{ notify_service }}"
+            data:
+              title: "{{ friendly_name }}: Error"
+              message: "{{ txt_error }}"
+              data: { tag: "{{ random_tag }}" }
+
+      # SCENARIO D: FIN
+      - conditions:
+          - condition: trigger
+            id: "trigger_power_end"
+          - condition: state
+            entity_id: !input state_helper
+            state: "RUNNING"
+        sequence:
+          - action: input_select.select_option
+            data: { option: "IDLE" }
+            target: { entity_id: !input state_helper }
+          - action: "{{ notify_service }}"
+            data:
+              title: "{{ friendly_name }}: Finished"
+              message: "{{ txt_finished }}"
+              data: { tag: "{{ random_tag }}" }
+
+mode: restart

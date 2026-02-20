@@ -1,0 +1,17 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Environments
+.env
+.venv
+env/
+venv/
+
+# Home Assistant specific
+.storage/
+*.log
+
+# OS and IDE
+.DS_Store
+.vscode/
