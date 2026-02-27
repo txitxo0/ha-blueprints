@@ -1,71 +1,154 @@
 blueprint:
-  name: "Appliance Orchestrator Pro v2.6"
-  description: "Orquestador avanzado para electrodomésticos con control de potencia, horarios y notificaciones interactivas."
+  name: "Appliance Orchestrator Pro v0.2"
+  description: "Agnostic appliance orchestrator. Cleaned input keys to prevent parser errors."
   domain: automation
   input:
+    appliance_name:
+      name: Appliance Name
+      description: "Name of the appliance (e.g., Washing Machine). Used in notification titles."
+      selector:
+        text:
     switch_plug:
-      name: Enchufe inteligente
-      description: El enchufe que controla el electrodoméstico.
+      name: Smart Plug
+      description: "The switch that controls the appliance power."
       selector:
         entity:
           domain: switch
     power_sensor:
-      name: Sensor de potencia
-      description: Sensor que mide el consumo en W.
+      name: Power Sensor
+      description: "Sensor that measures real-time power consumption (Watts)."
       selector:
         entity:
           domain: sensor
           device_class: power
     status_input:
-      name: Input Select de Estado
-      description: Input select con las opciones IDLE, RUNNING, WAITING_FOR_WINDOW, ERROR.
+      name: Status Input Select
+      description: "Helper to track states: IDLE, RUNNING, WAITING_FOR_WINDOW, ERROR."
       selector:
         entity:
           domain: input_select
     schedule_valle:
-      name: Horario Valle
-      description: El schedule que determina las horas baratas.
+      name: Energy Schedule
+      description: "Schedule defining when energy is cheap ('on' state)."
       selector:
         entity:
           domain: schedule
-    cycle_duration:
-      name: Duración del ciclo (minutos)
-      description: Tiempo que tarda el programa del aparato.
-      default: 27
+    p_start:
+      name: Start-up Power (W)
+      description: "Power threshold to detect when you physically press 'Start' on the appliance."
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 50
+          unit_of_measurement: W
+    p_working:
+      name: Working Power Threshold (W)
+      description: "Minimum power draw during a normal wash cycle. Used by the watchdog to detect failures/closed taps."
+      default: 15
+      selector:
+        number:
+          min: 5
+          max: 100
+          unit_of_measurement: W
+    p_end:
+      name: End-of-cycle Power (W)
+      description: "Power level below which the cycle is considered finished (e.g., standby consumption)."
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 10
+          unit_of_measurement: W
+    run_duration:
+      name: Cycle Duration (Minutes)
+      description: "Estimated total time for a full cycle. Used to check if there's enough time before the cheap window ends."
+      default: 70
       selector:
         number:
           min: 1
           max: 300
           unit_of_measurement: min
-    notify_device:
-      name: Dispositivo de notificación
-      description: Servicio de notificación (ej. notify.mobile_app_pixel_8_jesus)
+    wait_time:
+      name: Watchdog/End Delay (Minutes)
+      description: "Time to wait before confirming the cycle has ended or an error has occurred."
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 20
+          unit_of_measurement: min
+    notify_dev:
+      name: Notification Service
+      description: "Notification service (e.g., notify.mobile_app_your_phone)."
       selector:
         text:
+    msg_paused:
+      name: "Message: Paused"
+      description: "Text shown when the appliance is waiting for a cheap window."
+      default: "Outside cheap window or insufficient time."
+      selector:
+        text:
+    btn_label:
+      name: "Label: Bypass Button"
+      description: "Label for the interactive button to force an immediate start."
+      default: "▶️ Start Now (5min)"
+      selector:
+        text:
+    msg_error:
+      name: "Message: Error"
+      description: "Text shown if the appliance is in RUNNING state but no power is drawn (Watchdog)."
+      default: "No power draw detected. Check the door!"
+      selector:
+        text:
+    msg_finished:
+      name: "Message: Finished"
+      description: "Text shown when the cycle ends successfully."
+      default: "Cycle completed successfully (Finished at {{ now().strftime('%H:%M') }})."
+      selector:
+        text:
+
+# --- CUSTOM ACTION HOOKS ---
+    action_paused:
+      name: "(Optional) Custom Action: On Pause"
+      description: "Run when the appliance is waiting for the energy window."
+      default: []
+      selector: { action: {} }
+    action_error:
+      name: "(Optional) Custom Action: On Error"
+      description: "Run when a watchdog error (e.g. door open) is detected."
+      default: []
+      selector: { action: {} }
+    action_finished:
+      name: "(Optional) Custom Action: On Finished"
+      description: "Run when the cycle ends (e.g. turn on a smart light or play TTS)."
+      default: []
+      selector: { action: {} }
 
 mode: parallel
 max: 10
 
 variables:
-  # Pasamos los inputs a variables internas para usarlas en plantillas
+  # Map inputs to variables for Jinja use
   status_entity: !input status_input
   schedule_entity: !input schedule_valle
-  duration_min: !input cycle_duration
-  switch_entity: !input switch_plug
-  power_entity: !input power_sensor
-  notify_service: !input notify_device
-  # Generamos un tag único basado en el nombre de la automatización para evitar colisiones
-  notif_tag: "orchestrator_{{ this.entity_id }}"
+  appliance: !input appliance_name
+  notify_service: !input notify_dev
+  duration_min: !input run_duration
+  txt_paused: !input msg_paused
+  txt_error: !input msg_error
+  txt_finished: !input msg_finished
+  txt_btn: !input btn_label
+  notif_tag: "orch_{{ this.entity_id }}"
 
 trigger:
   - trigger: event
     event_type: mobile_app_notification_action
-    event_data:
-      action: LAVAR_AHORA
+    event_data: { action: "WASH_NOW" }
     id: trig_bypass
   - trigger: numeric_state
     entity_id: !input power_sensor
-    above: 3
+    above: !input p_start
     for: "00:00:30"
     id: trig_admission
   - trigger: state
@@ -76,35 +159,35 @@ trigger:
   - trigger: state
     entity_id: !input status_input
     to: RUNNING
+    from:
+    - IDLE
+    - WAITING_FOR_WINDOW
     id: trig_watchdog
   - trigger: numeric_state
     entity_id: !input power_sensor
-    below: 2
-    for: "00:03:00"
+    below: !input p_end
+    for: 
+      minutes: !input wait_time
     id: trig_end_cycle
 
 action:
   - choose:
-      # --- 1. BYPASS Y REINICIO ---
+      # --- 1. BYPASS & RESTART ---
       - conditions:
           - condition: template
-            value_template: "{{ trigger.id in ['trig_bypass', 'trig_restart'] }}"
+            value_template: >
+              {{ trigger.id == 'trig_bypass' or 
+              (trigger.id == 'trig_restart' and is_state(status_entity, 'WAITING_FOR_WINDOW')) }}
         sequence:
           - action: switch.turn_on
-            target:
-              entity_id: !input switch_plug
+            target: { entity_id: !input switch_plug }
           - action: input_select.select_option
-            target:
-              entity_id: !input status_input
-            data:
-              option: RUNNING
+            target: { entity_id: !input status_input }
+            data: { option: RUNNING }
           - action: "{{ notify_service }}"
-            data:
-              message: clear_notification
-              data:
-                tag: "{{ notif_tag }}"
+            data: { message: "clear_notification", data: { tag: "{{ notif_tag }}" } }
 
-      # --- 2. ADMISIÓN: CÁLCULO CONTEXTUAL ---
+      # --- 2. ADMISSION ---
       - conditions:
           - condition: trigger
             id: trig_admission
@@ -114,76 +197,67 @@ action:
           - variables:
               is_cheap: "{{ is_state(schedule_entity, 'on') }}"
               next_ev: "{{ state_attr(schedule_entity, 'next_event') }}"
-              time_needed_sec: "{{ duration_min | int * 60 }}"
-              reason: >
-                {% if not is_cheap %}
-                  Fuera de horario valle.
-                {% elif is_cheap and next_ev is not none and (as_timestamp(next_ev) - as_timestamp(now())) | int < time_needed_sec %}
-                  Ventana insuficiente (quedan menos de {{ duration_min }} min).
+              time_needed: "{{ (duration_min | int) * 60 }}"
+              is_too_late: >
+                {% if is_cheap and next_ev is not none %}
+                  {{ (as_timestamp(next_ev) - as_timestamp(now())) | int < time_needed | int }}
                 {% else %}
-                  none
+                  {{ not is_cheap }}
                 {% endif %}
           - if:
               - condition: template
-                value_template: "{{ reason != 'none' }}"
+                value_template: "{{ is_too_late }}"
             then:
               - action: switch.turn_off
-                target:
-                  entity_id: !input switch_plug
+                target: { entity_id: !input switch_plug }
               - action: input_select.select_option
-                target:
-                  entity_id: !input status_input
-                data:
-                  option: WAITING_FOR_WINDOW
+                target: { entity_id: !input status_input }
+                data: { option: WAITING_FOR_WINDOW }
               - action: "{{ notify_service }}"
                 data:
-                  title: "🕒 Electrodoméstico en pausa"
-                  message: "{{ reason }} ¿Quieres forzar el inicio?"
+                  title: "🕒 {{ appliance }}"
+                  message: "{{ txt_paused }}"
                   data:
                     tag: "{{ notif_tag }}"
-                    actions:
-                      - action: LAVAR_AHORA
-                        title: Lavar ahora
+                    actions: [{action: "WASH_NOW", title: "{{ txt_btn }}"}]
+              # --- CUSTOM ACTION HOOK: PAUSED ---
+              - choose: []
+                default: !input action_paused
               - delay: "00:05:00"
               - action: "{{ notify_service }}"
-                data:
-                  message: clear_notification
-                  data:
-                    tag: "{{ notif_tag }}"
+                data: { message: "clear_notification", data: { tag: "{{ notif_tag }}" } }
             else:
               - action: input_select.select_option
-                target:
-                  entity_id: !input status_input
-                data:
-                  option: RUNNING
+                target: { entity_id: !input status_input }
+                data: { option: RUNNING }
 
-      # --- 3. WATCHDOG: SEGURIDAD ---
+      # --- 3. WATCHDOG ---
       - conditions:
           - condition: trigger
             id: trig_watchdog
         sequence:
-          - delay: "00:03:00"
+          - delay: 
+              minutes: !input wait_time
           - if:
               - condition: state
                 entity_id: !input status_input
                 state: RUNNING
               - condition: numeric_state
                 entity_id: !input power_sensor
-                below: 15
+                below: !input p_working
             then:
               - action: input_select.select_option
-                target:
-                  entity_id: !input status_input
-                data:
-                  option: ERROR
+                target: { entity_id: !input status_input }
+                data: { option: ERROR }
               - action: "{{ notify_service }}"
                 data:
-                  title: "⚠️ Error de Inicio"
-                  message: "No se detecta carga. Comprueba el estado del aparato."
-                  data:
-                    tag: "{{ notif_tag }}"
-
-      # --- 4. FIN DE CICLO ---
+                  title: "⚠️ {{ appliance }}"
+                  message: "{{ txt_error }}"
+                  data: { tag: "{{ notif_tag }}", priority: high }
+              # --- CUSTOM ACTION HOOK: ERROR ---
+              - choose: []
+                default: !input action_error
+      # --- 4. END OF CYCLE ---
       - conditions:
           - condition: trigger
             id: trig_end_cycle
@@ -191,13 +265,13 @@ action:
             value_template: "{{ states(status_entity) in ['RUNNING', 'ERROR'] }}"
         sequence:
           - action: input_select.select_option
-            target:
-              entity_id: !input status_input
-            data:
-              option: IDLE
+            target: { entity_id: !input status_input }
+            data: { option: IDLE }
           - action: "{{ notify_service }}"
             data:
-              title: "✅ Ciclo Finalizado"
-              message: "Tarea terminada. Consumo en reposo."
-              data:
-                tag: "{{ notif_tag }}"
+              title: "✅ {{ appliance }}"
+              message: "{{ txt_finished }}"
+              data: { tag: "{{ notif_tag }}" }
+          # --- CUSTOM ACTION HOOK: FINISHED ---
+          - choose: []
+            default: !input action_finished
