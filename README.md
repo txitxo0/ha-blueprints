@@ -1,32 +1,64 @@
-# My Home Assistant Blueprints
+# Home Assistant Blueprints
 
-Home Assistant blueprints for energy optimization.
-
-## ⚡ Appliance Lifecycle Manager (v0.2)
-
-The Appliance Orchestrator Pro is an agnostic lifecycle manager designed to handle any appliance (Dishwasher, Washing Machine, Dryer) by monitoring power consumption and energy schedules.
-
-### 🌟 Features
-- **Smart Admission Control:** Automatically pauses the appliance if started outside the cheap energy window or if there isn't enough time to finish the cycle.
-- **Customizable Notifications:** You can define your own messages for waiting, error, and completion states. Supports Jinja2 templates for timestamps.
-- **Watchdog Protection:** Detects if an appliance was turned on but failed to start (e.g., door left open) and sends a high-priority alert.
-- **Intelligent Bypass:** Interactive mobile notifications allow you to "Start Now" and override the energy schedule for 5 minutes.
-- **Auto-Cleanup:** Clean notification management using unique tags to prevent clutter.
-
-[![Import Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Ftxitxo0%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fenergy%2Fappliance_lifecycle_manager.yaml)
+A growing collection of blueprints for energy-aware home automation.
 
 ---
 
-## 🛠 Prerequisites
-1. **Status Helper:** Create an input_select with the following exact options:
-    - `IDLE`, `RUNNING`, `WAITING_FOR_WINDOW`, `ERROR`.
-1. **Energy Schedule:** A schedule entity defining your "Cheap/Valle" hours.
-1. **Power Monitoring:** A smart plug or sensor with power (W) reporting.
-1. **Notification Service:** Use a valid mobile notification service.
+## Blueprints
+### ⚡ Appliance Orchestrator Pro — `v1.3.1-beta` ·
+
+[![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Ftxitxo0%2Fha-blueprints%2Fblob%2Fbeta%2Fblueprints%2Fautomation%2Fenergy%2Fappliance_lifecycle_manager.yaml)
+
+Agnostic lifecycle manager for any power-monitored appliance (washing machine, dishwasher, dryer). Orchestrates the full cycle against an energy schedule: holds the appliance in a waiting state outside cheap hours, resumes automatically when the window opens, and validates the cycle duration to detect failures.
+
+**State machine:** `IDLE` → `WAITING_FOR_WINDOW` ↔ `RUNNING` → `IDLE` / `ERROR`
+
+**Key behaviors:**
+- Admission control: blocks start if outside the cheap window or if remaining time is insufficient to complete the cycle
+- Watchdog: detects start failures (e.g. door left open) and anomalous cycle durations
+- Actionable notifications: "Start Now" bypass delivered to mobile, auto-cleared after 5 minutes
+- All notification messages are user-defined and support Jinja2 templates
+- Custom actions on pause, error, and completion
+
+#### 🛠 Prerequisites 
+
+1. `input_select` helper with options: `IDLE`, `RUNNING`, `WAITING_FOR_WINDOW`, `ERROR`
+2. HA `schedule` entity defining cheap energy hours
+3. Smart plug or sensor reporting power in W
+4. Mobile notification service (e.g. `notify.mobile_app_iphone`)
+
+> [!TIP]
+> To notify multiple people, use a notification group in `configuration.yaml`:
+> ```yaml
+> notify:
+>   - name: family
+>     platform: group
+>     services:
+>       - service: mobile_app_person1
+>       - service: mobile_app_person2
+> ```
+
+---
+
+## 🌟 Roadmap
+
+- **PVPC → Schedule parser** — automation blueprint that reads the Spanish PVPC electricity price feed and materializes cheap hours into a native HA `schedule` entity, making it a drop-in input for the Orchestrator
+- Additional price feed parsers (Octopus Energy, generic ENTSO-E)
+- Multi-appliance coordination (queue management)
+
+---
 
 ## 📂 Repository Structure
-This repository is organized by domain to allow for future expansion:
-- `/energy`: Power management and appliance orchestration.
-- `/script`: (Comming soon) Transformers from different ligth tiers to an HA schedule
+```
+blueprints/
+└── automation/
+    └── energy/
+        ├── appliance_lifecycle_manager.yaml
+        └── (upcoming parsers)
+```
+
+---
+
 ## ⚖️ License
-Licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/).
+
+[CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)
