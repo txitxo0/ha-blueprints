@@ -1,5 +1,5 @@
 blueprint:
-  name: "Appliance Orchestrator Pro v1.3.1"
+  name: "Appliance Orchestrator Pro v1.3.2"
   description: "Smart lifecycle manager with energy schedule awareness, watchdog, and actionable notifications."
   domain: automation
   input:
@@ -166,8 +166,6 @@ action:
               t_ref: "{{ duration_min | int }}"
               is_startup_err: "{{ actual_dur < (t_ref * 0.05) }}"
               is_success: "{{ actual_dur >= (t_ref * 0.75) and actual_dur <= (t_ref * 1.5) }}"
-          - action: switch.turn_off
-            target: { entity_id: !input switch_plug }
           - choose:
               - conditions: "{{ is_startup_err }}"
                 sequence:

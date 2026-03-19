@@ -1,64 +1,50 @@
-# Home Assistant Blueprints
+# 📦 ha-blueprints
 
-A growing collection of blueprints for energy-aware home automation.
+A collection of Home Assistant blueprints organized by domain. Each blueprint lives in its own folder with dedicated documentation.
 
----
-
-## Blueprints
-### ⚡ Appliance Orchestrator Pro — `v1.3.1-beta` ·
-
-[![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Ftxitxo0%2Fha-blueprints%2Fblob%2Fbeta%2Fblueprints%2Fautomation%2Fenergy%2Fappliance_lifecycle_manager.yaml)
-
-Agnostic lifecycle manager for any power-monitored appliance (washing machine, dishwasher, dryer). Orchestrates the full cycle against an energy schedule: holds the appliance in a waiting state outside cheap hours, resumes automatically when the window opens, and validates the cycle duration to detect failures.
-
-**State machine:** `IDLE` → `WAITING_FOR_WINDOW` ↔ `RUNNING` → `IDLE` / `ERROR`
-
-**Key behaviors:**
-- Admission control: blocks start if outside the cheap window or if remaining time is insufficient to complete the cycle
-- Watchdog: detects start failures (e.g. door left open) and anomalous cycle durations
-- Actionable notifications: "Start Now" bypass delivered to mobile, auto-cleared after 5 minutes
-- All notification messages are user-defined and support Jinja2 templates
-- Custom actions on pause, error, and completion
-
-#### 🛠 Prerequisites 
-
-1. `input_select` helper with options: `IDLE`, `RUNNING`, `WAITING_FOR_WINDOW`, `ERROR`
-2. HA `schedule` entity defining cheap energy hours
-3. Smart plug or sensor reporting power in W
-4. Mobile notification service (e.g. `notify.mobile_app_iphone`)
-
-> [!TIP]
-> To notify multiple people, use a notification group in `configuration.yaml`:
-> ```yaml
-> notify:
->   - name: family
->     platform: group
->     services:
->       - service: mobile_app_person1
->       - service: mobile_app_person2
-> ```
+> Licensed under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)
 
 ---
 
-## 🌟 Roadmap
+## ⚡ Energy
 
-- **PVPC → Schedule parser** — automation blueprint that reads the Spanish PVPC electricity price feed and materializes cheap hours into a native HA `schedule` entity, making it a drop-in input for the Orchestrator
-- Additional price feed parsers (Octopus Energy, generic ENTSO-E)
-- Multi-appliance coordination (queue management)
+### [Appliance Orchestrator Pro](./blueprints/automation/energy/appliance_lifecycle_manager.yaml)
+
+Smart lifecycle manager for home appliances with energy schedule awareness, watchdog protection and actionable notifications. Delays appliance start until off-peak energy windows, monitors the cycle and notifies on completion, anomaly or error.
+
+→ [Documentation](./blueprints/automation/energy/README.md)
+
+[![Import Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/txitxo0/ha-blueprints/main/blueprints/automation/energy/appliance_lifecycle_manager.yaml)
 
 ---
 
-## 📂 Repository Structure
+## 🧹 Cleaning
+
+### [Vacuum Notification Card](./blueprints/automation/cleaning/vacuum_notification_card.yaml)
+
+Persistent Android notification card for robot vacuums. Shows live status, tank level and a live map snapshot while cleaning. Sends a completion notification with the final map on dock. Fully controllable from the notification.
+
+→ [Documentation](./blueprints/automation/cleaning/README.md)
+
+[![Import Blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/txitxo0/ha-blueprints/main/blueprints/automation/cleaning/vacuum_notification_card.yaml)
+
+---
+
+## Repository Structure
+
 ```
 blueprints/
 └── automation/
-    └── energy/
-        ├── appliance_lifecycle_manager.yaml
-        └── (upcoming parsers)
+    ├── energy/
+    │   ├── appliance_lifecycle_manager.yaml
+    │   └── README.md
+    └── cleaning/
+        ├── vacuum_notification_card.yaml
+        └── README.md
 ```
 
 ---
 
-## ⚖️ License
+## Contributing
 
-[CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)
+Feel free to open an issue or PR if you find a bug or want to suggest an improvement.

@@ -1,0 +1,194 @@
+blueprint:
+  name: "Vacuum Notification Card v1.0.0"
+  description: "Persistent Android notification card for robot vacuums with live map image, tank sensor, actionable buttons and a completed notification on dock."
+  domain: automation
+  input:
+    vacuum_entity:
+      name: Vacuum Entity
+      selector: { entity: { domain: vacuum } }
+    tank_sensor:
+      name: Tank Percentage Sensor
+      selector: { entity: { domain: sensor } }
+    map_image_url:
+      name: Map Image URL
+      description: >
+        Full URL to the live map camera snapshot. Must be reachable from the mobile device.
+        Local network only: http://192.168.x.x:8123/api/camera_proxy/camera.your_map
+        External access (recommended): https://your-host.duckdns.org/api/camera_proxy/camera.your_map?token={{ state_attr('camera.your_map', 'access_token') }}
+      selector: { text: {} }
+    notify_service:
+      name: Notification Service
+      description: "e.g. notify.mobile_app_pixel_8 or notify.family"
+      selector: { text: {} }
+
+mode: queued
+max: 5
+
+variables:
+  vacuum_entity: !input vacuum_entity
+  tank_sensor: !input tank_sensor
+  map_image_url: !input map_image_url
+  notify_service: !input notify_service
+  notification_tag: "{{ vacuum_entity.replace('.', '_') }}_vacuum_notification_card"
+  notification_completed_tag: "{{ vacuum_entity.replace('.', '_') }}_vacuum_completed_card"
+
+trigger:
+  - trigger: state
+    entity_id: !input vacuum_entity
+    id: vacuum_state_changed
+  - trigger: state
+    entity_id: !input tank_sensor
+    id: tank_changed
+  - trigger: event
+    event_type: mobile_app_notification_action
+    event_data: { action: VACUUM_START_RESUME }
+    id: action_start_resume
+  - trigger: event
+    event_type: mobile_app_notification_action
+    event_data: { action: VACUUM_HOME }
+    id: action_home
+
+condition: []
+
+action:
+  - choose:
+
+      # --- 1. DOCKED → send completed notification + clear persistent notification
+      # Only triggers if coming from an active state, ignoring unavailable/unknown transitions
+      - conditions:
+          - condition: trigger
+            id: vacuum_state_changed
+          - condition: template
+            value_template: "{{ is_state(vacuum_entity, 'docked') }}"
+          - condition: template
+            value_template: >
+              {{ trigger.from_state.state in ['cleaning', 'paused', 'returning', 'idle'] }}
+        sequence:
+          - action: "{{ notify_service }}"
+            data:
+              title: "✅ {{ state_attr(vacuum_entity, 'friendly_name') }}"
+              message: "Cleaning completed. The robot has returned to base."
+              data:
+                tag: "{{ notification_completed_tag }}"
+                sticky: "false"
+                notification_icon: "mdi:robot-vacuum"
+                image: "{{ map_image_url }}"
+          - action: "{{ notify_service }}"
+            data:
+              message: clear_notification
+              data:
+                tag: "{{ notification_tag }}"
+
+      # --- 2. STATE CHANGED (not docked/unavailable/unknown) OR TANK CHANGED → send/update persistent notification
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: vacuum_state_changed
+              - condition: trigger
+                id: tank_changed
+          - condition: template
+            value_template: >
+              {{ not is_state(vacuum_entity, 'docked') and
+                 states(vacuum_entity) not in ['unavailable', 'unknown'] }}
+        sequence:
+          - action: "{{ notify_service }}"
+            data:
+              title: >
+                🤖 {{ state_attr(vacuum_entity, 'friendly_name') }}
+              message: >
+                {%- set state_map = {
+                  'cleaning': '🧹 Cleaning',
+                  'paused': '⏸ Paused',
+                  'returning': '🏠 Returning to base',
+                  'idle': '💤 Idle',
+                  'error': '❌ Error'
+                } %}
+                {{ state_map.get(states(vacuum_entity), states(vacuum_entity)) }}
+                {%- if state_attr(vacuum_entity, 'battery_level') is not none %}
+                · 🔋 {{ state_attr(vacuum_entity, 'battery_level') }}%
+                {%- endif %}
+                {%- if states(tank_sensor) not in ['unknown', 'unavailable'] %}
+                · 🪣 Tank: {{ states(tank_sensor) }}%
+                {%- endif %}
+              data:
+                tag: "{{ notification_tag }}"
+                sticky: "true"
+                persistent: "true"
+                notification_icon: "mdi:robot-vacuum"
+                image: "{{ map_image_url }}"
+                actions:
+                  - action: VACUUM_START_RESUME
+                    title: >
+                      {% if states(vacuum_entity) not in ['cleaning', 'returning', 'docked'] %}▶ Resume{% else %}⏹ Stop{% endif %}
+                  - action: VACUUM_HOME
+                    title: "🏠 Go home"
+
+      # --- 3. ACTION START/RESUME from notification → optimistic update while robot confirms
+      - conditions:
+          - condition: trigger
+            id: action_start_resume
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ states(vacuum_entity) not in ['cleaning', 'returning', 'docked'] }}"
+                sequence:
+                  - action: vacuum.start
+                    target: { entity_id: "{{ vacuum_entity }}" }
+                  - action: "{{ notify_service }}"
+                    data:
+                      title: "🤖 {{ state_attr(vacuum_entity, 'friendly_name') }}"
+                      message: "⏳ Starting..."
+                      data:
+                        tag: "{{ notification_tag }}"
+                        sticky: "true"
+                        persistent: "true"
+                        notification_icon: "mdi:robot-vacuum"
+                        image: "{{ map_image_url }}"
+                        actions:
+                          - action: VACUUM_START_RESUME
+                            title: "⏹ Stop"
+                          - action: VACUUM_HOME
+                            title: "🏠 Go home"
+            default:
+              - action: vacuum.stop
+                target: { entity_id: "{{ vacuum_entity }}" }
+              - action: "{{ notify_service }}"
+                data:
+                  title: "🤖 {{ state_attr(vacuum_entity, 'friendly_name') }}"
+                  message: "⏳ Stopping..."
+                  data:
+                    tag: "{{ notification_tag }}"
+                    sticky: "true"
+                    persistent: "true"
+                    notification_icon: "mdi:robot-vacuum"
+                    image: "{{ map_image_url }}"
+                    actions:
+                      - action: VACUUM_START_RESUME
+                        title: "▶ Resume"
+                      - action: VACUUM_HOME
+                        title: "🏠 Go home"
+
+      # --- 4. ACTION GO HOME from notification → optimistic update while robot confirms
+      - conditions:
+          - condition: trigger
+            id: action_home
+        sequence:
+          - action: vacuum.return_to_base
+            target: { entity_id: "{{ vacuum_entity }}" }
+          - action: "{{ notify_service }}"
+            data:
+              title: "🤖 {{ state_attr(vacuum_entity, 'friendly_name') }}"
+              message: "⏳ Returning to base..."
+              data:
+                tag: "{{ notification_tag }}"
+                sticky: "true"
+                persistent: "true"
+                notification_icon: "mdi:robot-vacuum"
+                image: "{{ map_image_url }}"
+                actions:
+                  - action: VACUUM_START_RESUME
+                    title: "⏹ Stop"
+                  - action: VACUUM_HOME
+                    title: "🏠 Go home"
