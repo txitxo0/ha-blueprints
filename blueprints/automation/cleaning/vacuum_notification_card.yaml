@@ -1,6 +1,6 @@
 blueprint:
-  name: "Vacuum Notification Card v1.0.0"
-  description: "Persistent Android notification card for robot vacuums with live map image, tank sensor, actionable buttons and a completed notification on dock."
+  name: "Vacuum Notification Card v1.2.0"
+  description: "Persistent Android notification card for robot vacuums with live map image, optional tank sensor, actionable buttons and a completed notification on dock."
   domain: automation
   input:
     vacuum_entity:
@@ -8,6 +8,8 @@ blueprint:
       selector: { entity: { domain: vacuum } }
     tank_sensor:
       name: Tank Percentage Sensor
+      description: "Optional. Sensor reporting dust tank fill level. Leave empty if not available."
+      default: ""
       selector: { entity: { domain: sensor } }
     map_image_url:
       name: Map Image URL
@@ -18,7 +20,7 @@ blueprint:
       selector: { text: {} }
     notify_service:
       name: Notification Service
-      description: "e.g. notify.mobile_app_pixel_8 or notify.family"
+      description: "e.g. notify.mobile_app_person1"
       selector: { text: {} }
 
 mode: queued
@@ -37,8 +39,9 @@ trigger:
     entity_id: !input vacuum_entity
     id: vacuum_state_changed
   - trigger: state
-    entity_id: !input tank_sensor
-    id: tank_changed
+    entity_id: !input vacuum_entity
+    attribute: battery_level
+    id: battery_changed
   - trigger: event
     event_type: mobile_app_notification_action
     event_data: { action: VACUUM_START_RESUME }
@@ -53,7 +56,7 @@ condition: []
 action:
   - choose:
 
-      # --- 1. DOCKED → send completed notification + clear persistent notification
+      # --- 1. DOCKED → send completed notification (with sound) + clear persistent notification
       # Only triggers if coming from an active state, ignoring unavailable/unknown transitions
       - conditions:
           - condition: trigger
@@ -71,6 +74,7 @@ action:
               data:
                 tag: "{{ notification_completed_tag }}"
                 sticky: "false"
+                channel: "Vacuum Alerts"
                 notification_icon: "mdi:robot-vacuum"
                 image: "{{ map_image_url }}"
           - action: "{{ notify_service }}"
@@ -79,14 +83,16 @@ action:
               data:
                 tag: "{{ notification_tag }}"
 
-      # --- 2. STATE CHANGED (not docked/unavailable/unknown) OR TANK CHANGED → send/update persistent notification
+      # --- 2. STATE CHANGED (not docked/unavailable/unknown) OR BATTERY CHANGED → send/update persistent notification
+      # battery_changed also fires while charging (docked), but the docked condition filters it out
+      # First notification (docked → cleaning) uses sound channel, updates use silent channel
       - conditions:
           - condition: or
             conditions:
               - condition: trigger
                 id: vacuum_state_changed
               - condition: trigger
-                id: tank_changed
+                id: battery_changed
           - condition: template
             value_template: >
               {{ not is_state(vacuum_entity, 'docked') and
@@ -108,7 +114,7 @@ action:
                 {%- if state_attr(vacuum_entity, 'battery_level') is not none %}
                 · 🔋 {{ state_attr(vacuum_entity, 'battery_level') }}%
                 {%- endif %}
-                {%- if states(tank_sensor) not in ['unknown', 'unavailable'] %}
+                {%- if tank_sensor != '' and states(tank_sensor) not in ['unknown', 'unavailable'] %}
                 · 🪣 Tank: {{ states(tank_sensor) }}%
                 {%- endif %}
               data:
@@ -117,6 +123,12 @@ action:
                 persistent: "true"
                 notification_icon: "mdi:robot-vacuum"
                 image: "{{ map_image_url }}"
+                channel: >
+                  {% if trigger.from_state.state == 'docked' and is_state(vacuum_entity, 'cleaning') %}
+                    Vacuum Alerts
+                  {% else %}
+                    Vacuum Status
+                  {% endif %}
                 actions:
                   - action: VACUUM_START_RESUME
                     title: >
@@ -144,6 +156,7 @@ action:
                         tag: "{{ notification_tag }}"
                         sticky: "true"
                         persistent: "true"
+                        channel: "Vacuum Status"
                         notification_icon: "mdi:robot-vacuum"
                         image: "{{ map_image_url }}"
                         actions:
@@ -162,6 +175,7 @@ action:
                     tag: "{{ notification_tag }}"
                     sticky: "true"
                     persistent: "true"
+                    channel: "Vacuum Status"
                     notification_icon: "mdi:robot-vacuum"
                     image: "{{ map_image_url }}"
                     actions:
@@ -185,6 +199,7 @@ action:
                 tag: "{{ notification_tag }}"
                 sticky: "true"
                 persistent: "true"
+                channel: "Vacuum Status"
                 notification_icon: "mdi:robot-vacuum"
                 image: "{{ map_image_url }}"
                 actions:

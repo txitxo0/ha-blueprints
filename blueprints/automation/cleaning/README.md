@@ -2,24 +2,36 @@
 
 Persistent Android notification card for robot vacuums. Shows live status, tank level and a live map snapshot while the vacuum is running. Sends a completion notification with the final map when the robot docks. Fully controllable from the notification itself.
 
+> **Note:** This blueprint is optimized for Android. It is also functional on iOS but persistent/sticky behaviour and silent update channels are not supported on that platform.
+
+---
+
+## Screenshots
+
+<img src="./img/cleaning.png" width="33%" alt="Cleaning notification">
+<img src="./img/returning.png" width="33%" alt="Returning home notification">
+<img src="./img/completed.png" width="33%" alt="Cleaning completed notification">
+
 ---
 
 ## Features
 
 - Persistent notification while the vacuum is active (auto-dismissed on dock)
-- Live map image updated every minute via camera snapshot
-- Tank percentage sensor displayed in the notification body
+- Live map image updated on every battery level change during cleaning
+- Optional tank percentage sensor displayed in the notification body
 - Dynamic action button: **Stop** while cleaning, **Resume** when idle or paused
 - **Go home** button always available
+- Optimistic notification update on button press — immediate feedback without waiting for the robot to confirm
+- Sound only on first notification (cleaning starts) and on completion — silent updates in between
 - Completion notification with final map snapshot on dock
 - Notification tag auto-generated from the vacuum entity ID — safe to run multiple instances
+- Filters out `unavailable` and `unknown` state transitions to avoid spurious notifications
 
 ---
 
 ## Requirements
 
 - A vacuum entity supported by Home Assistant's `vacuum` domain
-- A sensor entity exposing the dust tank fill percentage
 - A camera entity exposing the live map (e.g. [Xiaomi Cloud Map Extractor](https://github.com/PiotrMachowski/Home-Assistant-custom-components-Xiaomi-Cloud-Map-Extractor))
 - Home Assistant Companion App installed on the target Android device
 
@@ -27,12 +39,12 @@ Persistent Android notification card for robot vacuums. Shows live status, tank 
 
 ## Inputs
 
-| Input | Description |
-|---|---|
-| **Vacuum Entity** | Your robot vacuum entity (`vacuum.*`) |
-| **Tank Percentage Sensor** | Sensor reporting dust tank fill level (`sensor.*`) |
-| **Map Image URL** | Full URL to the live map camera snapshot (see note below) |
-| **Notification Service** | Target notify service, e.g. `notify.mobile_app_pixel_8` or `notify.family` (see note below) |
+| Input | Required | Description |
+|---|---|---|
+| **Vacuum Entity** | ✅ | Your robot vacuum entity (`vacuum.*`) |
+| **Tank Percentage Sensor** | ❌ | Sensor reporting dust tank fill level (`sensor.*`). Leave empty if not available |
+| **Map Image URL** | ✅ | Full URL to the live map camera snapshot (see note below) |
+| **Notification Service** | ✅ | Target notify service, e.g. `notify.mobile_app_person1` or `notify.family` (see note below) |
 
 ---
 
@@ -45,13 +57,26 @@ notify:
   - name: family
     platform: group
     services:
-      - service: mobile_app_pixel_8_jesus
-      - service: mobile_app_partner_phone
+      - service: mobile_app_person1
+      - service: mobile_app_person2
 ```
 
 After adding this, restart Home Assistant. The group will be available as `notify.family`.
 
 > **Note:** When using a notification group, presence-based filtering is not applied — all group members will receive the notification regardless of their location.
+
+---
+
+## Notification Channels (Android only)
+
+This blueprint uses two notification channels to control sound behaviour:
+
+| Channel | Sound | Used for |
+|---|---|---|
+| `Vacuum Alerts` | ✅ Yes | Cleaning started, cleaning completed |
+| `Vacuum Status` | ❌ No | State updates during cleaning, button feedback |
+
+The channels are created automatically on first use. To configure sound, vibration or importance for each channel go to **Settings → Apps → Home Assistant → Notifications** on your Android device.
 
 ---
 
@@ -80,7 +105,9 @@ https://your-host.duckdns.org/api/camera_proxy/camera.your_map?token={{ state_at
 
 ## Installation
 
-[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/txitxo0/ha-blueprints/main/blueprints/automation/cleaning/vacuum_notification_card.yaml)
+<a href="https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/txitxo0/ha-blueprints/main/blueprints/automation/cleaning/vacuum_notification_card.yaml">
+  <img src="https://my.home-assistant.io/badges/blueprint_import.svg" width="50%" alt="Import Blueprint">
+</a>
 
 Or import manually:
 
@@ -92,6 +119,8 @@ Or import manually:
 
 ## Notes
 
-- The notification refreshes every minute via a `time_pattern` trigger to keep the map and status current
+- The notification refreshes on every `battery_level` attribute change of the vacuum entity. This guarantees map and status updates during long cleaning sessions without requiring a dedicated tank sensor trigger. The same trigger also fires while the robot is charging, but the `docked` state filter prevents any unnecessary notification updates in that case
+- The tank sensor is fully optional — if left empty, it is simply omitted from the notification body without affecting any other functionality
 - The notification tag is derived from the vacuum entity ID, so multiple instances of this blueprint for different vacuums will not interfere with each other
 - The completion notification is not persistent and can be dismissed with a swipe
+- Notification channels (sound control) are an Android-only feature and are ignored on iOS
