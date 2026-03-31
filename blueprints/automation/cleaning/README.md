@@ -23,6 +23,7 @@ Persistent Android notification card for robot vacuums. Shows live status, tank 
 - **Go home** button always available
 - Optimistic notification update on button press — immediate feedback without waiting for the robot to confirm
 - Sound only on first notification (cleaning starts) and on completion — silent updates in between
+- Persistent error notification with dedicated sound channel — auto-dismissed when the error is resolved
 - Completion notification with final map snapshot on dock
 - Notification tag auto-generated from the vacuum entity ID — safe to run multiple instances
 - Filters out `unavailable` and `unknown` state transitions to avoid spurious notifications
@@ -69,11 +70,12 @@ After adding this, restart Home Assistant. The group will be available as `notif
 
 ## Notification Channels (Android only)
 
-This blueprint uses two notification channels to control sound behaviour:
+This blueprint uses three notification channels to control sound behaviour independently:
 
 | Channel | Sound | Used for |
 |---|---|---|
 | `Vacuum Alerts` | ✅ Yes | Cleaning started, cleaning completed |
+| `Vacuum Errors` | ✅ Yes | Robot encountered an error |
 | `Vacuum Status` | ❌ No | State updates during cleaning, button feedback |
 
 The channels are created automatically on first use. To configure sound, vibration or importance for each channel go to **Settings → Apps → Home Assistant → Notifications** on your Android device.
@@ -121,6 +123,7 @@ Or import manually:
 
 - The notification refreshes on every `battery_level` attribute change of the vacuum entity. This guarantees map and status updates during long cleaning sessions without requiring a dedicated tank sensor trigger. The same trigger also fires while the robot is charging, but the `docked` state filter prevents any unnecessary notification updates in that case
 - The tank sensor is fully optional — if left empty, it is simply omitted from the notification body without affecting any other functionality
+- The error notification is persistent and cannot be dismissed with a swipe. It is automatically cleared when the vacuum transitions out of the `error` state
 - The notification tag is derived from the vacuum entity ID, so multiple instances of this blueprint for different vacuums will not interfere with each other
 - The completion notification is not persistent and can be dismissed with a swipe
 - Notification channels (sound control) are an Android-only feature and are ignored on iOS

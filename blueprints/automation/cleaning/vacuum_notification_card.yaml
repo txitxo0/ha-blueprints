@@ -1,6 +1,6 @@
 blueprint:
-  name: "Vacuum Notification Card v1.2.0"
-  description: "Persistent Android notification card for robot vacuums with live map image, optional tank sensor, actionable buttons and a completed notification on dock."
+  name: "Vacuum Notification Card v1.3.0"
+  description: "Persistent Android notification card for robot vacuums with live map image, optional tank sensor, actionable buttons, error alerting and a completed notification on dock."
   domain: automation
   input:
     vacuum_entity:
@@ -33,6 +33,7 @@ variables:
   notify_service: !input notify_service
   notification_tag: "{{ vacuum_entity.replace('.', '_') }}_vacuum_notification_card"
   notification_completed_tag: "{{ vacuum_entity.replace('.', '_') }}_vacuum_completed_card"
+  notification_error_tag: "{{ vacuum_entity.replace('.', '_') }}_vacuum_error_card"
 
 trigger:
   - trigger: state
@@ -83,7 +84,51 @@ action:
               data:
                 tag: "{{ notification_tag }}"
 
-      # --- 2. STATE CHANGED (not docked/unavailable/unknown) OR BATTERY CHANGED → send/update persistent notification
+      # --- 2. ERROR → send persistent error notification (with sound) + clear status notification
+      - conditions:
+          - condition: trigger
+            id: vacuum_state_changed
+          - condition: template
+            value_template: "{{ is_state(vacuum_entity, 'error') }}"
+        sequence:
+          - action: "{{ notify_service }}"
+            data:
+              title: "❌ {{ state_attr(vacuum_entity, 'friendly_name') }}"
+              message: "The robot encountered an error and needs your attention."
+              data:
+                tag: "{{ notification_error_tag }}"
+                sticky: "true"
+                persistent: "true"
+                channel: "Vacuum Errors"
+                notification_icon: "mdi:robot-vacuum-alert"
+                image: "{{ map_image_url }}"
+                actions:
+                  - action: VACUUM_START_RESUME
+                    title: "▶ Resume"
+                  - action: VACUUM_HOME
+                    title: "🏠 Go home"
+          - action: "{{ notify_service }}"
+            data:
+              message: clear_notification
+              data:
+                tag: "{{ notification_tag }}"
+
+      # --- 3. ERROR RESOLVED → clear error notification
+      - conditions:
+          - condition: trigger
+            id: vacuum_state_changed
+          - condition: template
+            value_template: >
+              {{ trigger.from_state.state == 'error' and
+                 states(vacuum_entity) not in ['unavailable', 'unknown'] }}
+        sequence:
+          - action: "{{ notify_service }}"
+            data:
+              message: clear_notification
+              data:
+                tag: "{{ notification_error_tag }}"
+
+      # --- 4. STATE CHANGED (not docked/unavailable/unknown) OR BATTERY CHANGED → send/update persistent notification
       # battery_changed also fires while charging (docked), but the docked condition filters it out
       # First notification (docked → cleaning) uses sound channel, updates use silent channel
       - conditions:
@@ -96,7 +141,7 @@ action:
           - condition: template
             value_template: >
               {{ not is_state(vacuum_entity, 'docked') and
-                 states(vacuum_entity) not in ['unavailable', 'unknown'] }}
+                 states(vacuum_entity) not in ['unavailable', 'unknown', 'error'] }}
         sequence:
           - action: "{{ notify_service }}"
             data:
@@ -107,8 +152,7 @@ action:
                   'cleaning': '🧹 Cleaning',
                   'paused': '⏸ Paused',
                   'returning': '🏠 Returning to base',
-                  'idle': '💤 Idle',
-                  'error': '❌ Error'
+                  'idle': '💤 Idle'
                 } %}
                 {{ state_map.get(states(vacuum_entity), states(vacuum_entity)) }}
                 {%- if state_attr(vacuum_entity, 'battery_level') is not none %}
@@ -136,7 +180,7 @@ action:
                   - action: VACUUM_HOME
                     title: "🏠 Go home"
 
-      # --- 3. ACTION START/RESUME from notification → optimistic update while robot confirms
+      # --- 5. ACTION START/RESUME from notification → optimistic update while robot confirms
       - conditions:
           - condition: trigger
             id: action_start_resume
@@ -184,7 +228,7 @@ action:
                       - action: VACUUM_HOME
                         title: "🏠 Go home"
 
-      # --- 4. ACTION GO HOME from notification → optimistic update while robot confirms
+      # --- 6. ACTION GO HOME from notification → optimistic update while robot confirms
       - conditions:
           - condition: trigger
             id: action_home
