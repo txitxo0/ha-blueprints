@@ -1,5 +1,5 @@
 blueprint:
-  name: "Vacuum Notification Card v1.3.0"
+  name: "Vacuum Notification Card v1.3.1"
   description: "Persistent Android notification card for robot vacuums with live map image, optional tank sensor, actionable buttons, error alerting and a completed notification on dock."
   domain: automation
   input:
@@ -58,10 +58,16 @@ action:
   - choose:
 
       # --- 1. DOCKED → send completed notification (with sound) + clear persistent notification
-      # Only triggers if coming from an active state, ignoring unavailable/unknown transitions
+      # Accepts both vacuum_state_changed and battery_changed since battery_level may appear
+      # for the first time on dock after an unavailable period, firing battery_changed instead
+      # Uses last_changed comparison to guard against unavailable → docked false positives
       - conditions:
-          - condition: trigger
-            id: vacuum_state_changed
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: vacuum_state_changed
+              - condition: trigger
+                id: battery_changed
           - condition: template
             value_template: "{{ is_state(vacuum_entity, 'docked') }}"
           - condition: template
@@ -86,8 +92,12 @@ action:
 
       # --- 2. ERROR → send persistent error notification (with sound) + clear status notification
       - conditions:
-          - condition: trigger
-            id: vacuum_state_changed
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: vacuum_state_changed
+              - condition: trigger
+                id: battery_changed
           - condition: template
             value_template: "{{ is_state(vacuum_entity, 'error') }}"
         sequence:
@@ -115,8 +125,12 @@ action:
 
       # --- 3. ERROR RESOLVED → clear error notification
       - conditions:
-          - condition: trigger
-            id: vacuum_state_changed
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: vacuum_state_changed
+              - condition: trigger
+                id: battery_changed
           - condition: template
             value_template: >
               {{ trigger.from_state.state == 'error' and
@@ -128,7 +142,7 @@ action:
               data:
                 tag: "{{ notification_error_tag }}"
 
-      # --- 4. STATE CHANGED (not docked/unavailable/unknown) OR BATTERY CHANGED → send/update persistent notification
+      # --- 4. STATE CHANGED (not docked/unavailable/unknown/error) OR BATTERY CHANGED → send/update persistent notification
       # battery_changed also fires while charging (docked), but the docked condition filters it out
       # First notification (docked → cleaning) uses sound channel, updates use silent channel
       - conditions:
