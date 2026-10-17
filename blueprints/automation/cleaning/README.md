@@ -43,6 +43,7 @@ Persistent Android notification card for robot vacuums. Shows live status, tank 
 | Input | Required | Description |
 |---|---|---|
 | **Vacuum Entity** | ✅ | Your robot vacuum entity (`vacuum.*`) |
+| **Battery Percentage Sensor** | ✅ | Sensor reporting the vacuum battery level (`sensor.*`) |
 | **Tank Percentage Sensor** | ❌ | Sensor reporting dust tank fill level (`sensor.*`). Leave empty if not available |
 | **Map Image URL** | ✅ | Full URL to the live map camera snapshot (see note below) |
 | **Notification Service** | ✅ | Target notify service, e.g. `notify.mobile_app_person1` or `notify.family` (see note below) |
@@ -121,7 +122,7 @@ Or import manually:
 
 ## Notes
 
-- The notification refreshes on every `battery_level` attribute change of the vacuum entity. This guarantees map and status updates during long cleaning sessions without requiring a dedicated tank sensor trigger. The same trigger also fires while the robot is charging, but the `docked` state filter prevents any unnecessary notification updates in that case
+- The notification refreshes on every state change of the battery percentage sensor. This keeps the battery and map current during long cleaning sessions. Battery sensor changes do not trigger completion or error-resolution notifications; those are based on vacuum state transitions
 - The tank sensor is fully optional — if left empty, it is simply omitted from the notification body without affecting any other functionality
 - The error notification is persistent and cannot be dismissed with a swipe. It is automatically cleared when the vacuum transitions out of the `error` state
 - The notification tag is derived from the vacuum entity ID, so multiple instances of this blueprint for different vacuums will not interfere with each other
